@@ -26,6 +26,9 @@ SSO_LOGIN_URL = 'https://sso.garmin.com/sso/login'
 # The weight date range url.
 WEIGHT_DATE_RANGE_URL = 'https://connect.garmin.com/modern/proxy/weight-service/weight/dateRange'
 
+# The wellness url (username must be formatted at end).
+WELLNESS_URL = 'https://connect.garmin.com/modern/proxy/userstats-service/wellness/daily/{}'
+
 
 def require_session(client_function):
     """Decorator that is used to annotate :class:`GarminClient`
@@ -162,6 +165,25 @@ class GarminClient(object):
             return None
         return json.loads(response.text)
 
+    @require_session
+    def get_calories(self, start=None, end=None):
+        query_params = {'_': int(time.time())}
+        if start is not None:
+            query_params['fromDate'] = start.strftime('%Y-%m-%d')
+        if end is not None:
+            query_params['untilDate'] = end.strftime('%Y-%m-%d')
+        url = '{}?{}'.format(
+            WELLNESS_URL.format(self.username),
+            urllib.parse.urlencode(query_params))
+        for metric in [23, 41, 42]:
+            url += '&metricId={}'.format(metric)
+        response = self.session.get(url)
+        if response.status_code != 200:
+            log.error('failed to fetch json summary: code={} text={}'.format(
+                response.status_code, response.text))
+            return None
+        return json.loads(response.text)
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -171,6 +193,12 @@ def main():
         '-p', '--password', type=str, help='Garmin Connect password')
     parser.add_argument(
         '--pretty-print', action='store_true', help='Pretty print output')
+    parser.add_argument(
+        '-t',
+        '--target',
+        choices=['weight', 'calories'],
+        default='weight',
+        help='Target stat to fetch')
     parser.add_argument('username')
     args = parser.parse_args()
 
@@ -188,8 +216,13 @@ def main():
 
     client = GarminClient(args.username, password)
     client.connect()
-    data = client.get_weight(start, end)
     printer = pprint.pprint if args.pretty_print else print
+
+    print(args.target)
+    if args.target == 'weight':
+        data = client.get_weight(start, end)
+    elif args.target == 'calories':
+        data = client.get_calories(start, end)
     printer(data)
 
 
